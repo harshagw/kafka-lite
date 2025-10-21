@@ -22,12 +22,18 @@ func handleConnection(conn net.Conn) {
 			return
 		}
 		reqData = reqData[:n]
-		req := parseRequest(reqData)
+		req, err := parseRequest(reqData)
+		if err != nil {
+			fmt.Println("Error parsing request: ", err.Error())
+			return
+		}
 
-		res := Response{}
+		var res *Response = nil
 		switch req.RequestApiKey {
 		case 18: // ApiVersions
 			res = handleApiVersionsRequest(req)
+		case 75: // DescribeTopicPartitions
+			res = handleDescribeTopicPartitionsRequest(req)
 		default:
 			fmt.Println("Unknown API key: ", req.RequestApiKey)
 			return
@@ -36,7 +42,6 @@ func handleConnection(conn net.Conn) {
 		sendResponse(conn, res)
 	}
 }
-
 
 func main() {
 	l, err := net.Listen("tcp", "0.0.0.0:9092")
