@@ -69,8 +69,6 @@ func handleApiVersionsRequest(req Request) Response {
 
 	responseBodyLength := 2 + 1 + 5 + (len(supportedAPIs) * 7) // 2 (error_code) + 1 (array_length) + 5 (4 bytes for throttle + 1 byte for tag_buffer) + 7 for each api (2 bytes for api_key, 2 bytes for min_api_version, 2 bytes for max_api_version, 1 byte for tag_buffers)
 
-	fmt.Println("Response body length: ", responseBodyLength)
-
 	responseBody := make([]byte, responseBodyLength)
 	binary.BigEndian.PutUint16(responseBody[0:2], uint16(errorCode))
 	responseBody[2] = uint8(len(supportedAPIs)+1) // For 0 supported APIs, we send 1 and so on
@@ -98,36 +96,51 @@ func handleApiVersionsRequest(req Request) Response {
 }
 
 
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
+	fmt.Println("Connection accepted")
+
+	for {
+		reqData := make([]byte, 1024)
+		n, err := conn.Read(reqData)
+		if err != nil {
+			fmt.Println("Error reading data: ", err.Error())
+			return
+		}
+		if n == 0 {
+			fmt.Println("Connection closed by client")
+			return
+		}
+		reqData = reqData[:n]
+		req := parseRequest(reqData)
+
+		res := Response{}
+		switch req.RequestApiKey {
+		case 18: // ApiVersions
+			res = handleApiVersionsRequest(req)
+		default:
+			fmt.Println("Unknown API key: ", req.RequestApiKey)
+			return
+		}
+
+		sendResponse(conn, res)
+	}
+}
+
 func main() {
 	l, err := net.Listen("tcp", "0.0.0.0:9092")
 	if err != nil {
 		fmt.Println("Failed to bind to port 9092")
 		os.Exit(1)
 	}
-	conn, err := l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
-	}
-	defer conn.Close()
 
-	reqData := make([]byte, 1024) 
-	n, err := conn.Read(reqData)
-	if err != nil {
-		fmt.Println("Error reading data: ", err.Error())
-		os.Exit(1)
+	for {
+		fmt.Println("Waiting for connection...")
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			os.Exit(1)
+		}
+		go handleConnection(conn)
 	}
-	reqData = reqData[:n] 
-	req := parseRequest(reqData)
-
-	res := Response{}
-	switch req.RequestApiKey {
-	case 18: // ApiVersions
-		res = handleApiVersionsRequest(req)
-	default:
-		fmt.Println("Unknown API key: ", req.RequestApiKey)
-		os.Exit(1)
-	}
-
-	sendResponse(conn, res)
 }
