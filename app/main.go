@@ -49,19 +49,17 @@ func handleApiVersionsRequest(req Request) Response {
 		MessageSize: req.MessageSize,
 		CorrelationId: req.CorrelationId,
 	}
-	
-	// parse the body
-	body := req.Body
-	errorCode := int16(binary.BigEndian.Uint16(body[0:2])) 
 
-	if errorCode < 0 || errorCode >= 4 {
-		// Not suported
-		res.Body = []byte{byte(int16(35))}
-	}else{
-		// Supported
-		res.Body = []byte{byte(int16(0))}
+	var errorCode int16 = 0
+
+	if req.RequestApiVersion < 0 || req.RequestApiVersion >= 4 {
+		errorCode = 35
 	}
 
+	responseBody := make([]byte, 2)
+	binary.BigEndian.PutUint16(responseBody[0:2], uint16(errorCode))
+	
+	res.Body = responseBody
 	return res
 }
 
