@@ -7,6 +7,38 @@ import (
 	"os"
 )
 
+type Request struct {
+	MessageSize int32
+	RequestApiKey int16
+	RequestApiVersion int16
+	CorrelationId int32
+}
+
+type Response struct {
+	MessageSize int32
+	CorrelationId int32
+}
+
+func parseRequest(reqData []byte) Request {
+	req := Request{}
+	req.MessageSize = int32(binary.BigEndian.Uint32(reqData[0:4]))
+	req.RequestApiKey = int16(binary.BigEndian.Uint16(reqData[4:6]))
+	req.RequestApiVersion = int16(binary.BigEndian.Uint16(reqData[6:8]))
+	req.CorrelationId = int32(binary.BigEndian.Uint32(reqData[8:12]))
+	return req
+}	
+
+func sendResponse(conn net.Conn, res Response) {
+	resData := make([]byte, 8)
+	binary.BigEndian.PutUint32(resData[0:4], uint32(res.MessageSize))
+	binary.BigEndian.PutUint32(resData[4:8], uint32(res.CorrelationId))
+	_, err := conn.Write(resData)
+	if err != nil {
+		fmt.Println("Error sending response: ", err.Error())
+		os.Exit(1)
+	}
+}
+
 
 func main() {
 	l, err := net.Listen("tcp", "0.0.0.0:9092")
@@ -28,18 +60,11 @@ func main() {
 		os.Exit(1)
 	}
 	reqData = reqData[:n] 
+	req := parseRequest(reqData)
 
-	resData := make([]byte, 8)
-	
-	messageSize := int32(0)
-	binary.BigEndian.PutUint32(resData[0:4], uint32(messageSize))
-	
-	correlationId := int32(7)
-	binary.BigEndian.PutUint32(resData[4:8], uint32(correlationId))
-	
-	_, err = conn.Write(resData)
-	if err != nil {
-		fmt.Println("Error writing data: ", err.Error())
-		os.Exit(1)
+	res := Response{
+		MessageSize: req.MessageSize,
+		CorrelationId: req.CorrelationId,
 	}
+	sendResponse(conn, res)
 }
