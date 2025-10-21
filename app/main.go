@@ -12,11 +12,13 @@ type Request struct {
 	RequestApiKey int16
 	RequestApiVersion int16
 	CorrelationId int32
+	Body []byte
 }
 
 type Response struct {
 	MessageSize int32
 	CorrelationId int32
+	Body []byte
 }
 
 func parseRequest(reqData []byte) Request {
@@ -25,18 +27,42 @@ func parseRequest(reqData []byte) Request {
 	req.RequestApiKey = int16(binary.BigEndian.Uint16(reqData[4:6]))
 	req.RequestApiVersion = int16(binary.BigEndian.Uint16(reqData[6:8]))
 	req.CorrelationId = int32(binary.BigEndian.Uint32(reqData[8:12]))
+	req.Body = reqData[12:]
 	return req
 }	
 
 func sendResponse(conn net.Conn, res Response) {
-	resData := make([]byte, 8)
+	responseSize := int32(len(res.Body)) + 8
+	resData := make([]byte, responseSize)
 	binary.BigEndian.PutUint32(resData[0:4], uint32(res.MessageSize))
 	binary.BigEndian.PutUint32(resData[4:8], uint32(res.CorrelationId))
+	copy(resData[8:], res.Body)
 	_, err := conn.Write(resData)
 	if err != nil {
 		fmt.Println("Error sending response: ", err.Error())
 		os.Exit(1)
 	}
+}
+
+func handleApiVersionsRequest(req Request) Response {
+	res := Response{
+		MessageSize: req.MessageSize,
+		CorrelationId: req.CorrelationId,
+	}
+	
+	// parse the body
+	body := req.Body
+	errorCode := int16(binary.BigEndian.Uint16(body[0:2])) 
+
+	if errorCode < 0 || errorCode >= 4 {
+		// Not suported
+		res.Body = []byte{byte(int16(35))}
+	}else{
+		// Supported
+		res.Body = []byte{byte(int16(0))}
+	}
+
+	return res
 }
 
 
@@ -62,9 +88,14 @@ func main() {
 	reqData = reqData[:n] 
 	req := parseRequest(reqData)
 
-	res := Response{
-		MessageSize: req.MessageSize,
-		CorrelationId: req.CorrelationId,
+	res := Response{}
+	switch req.RequestApiKey {
+	case 18: // ApiVersions
+		res = handleApiVersionsRequest(req)
+	default:
+		fmt.Println("Unknown API key: ", req.RequestApiKey)
+		os.Exit(1)
 	}
+
 	sendResponse(conn, res)
 }
