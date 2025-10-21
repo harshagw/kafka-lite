@@ -33,8 +33,9 @@ func parseRequest(reqData []byte) Request {
 
 func sendResponse(conn net.Conn, res Response) {
 	bodySize := int32(len(res.Body)) 
+	messageSize := bodySize + 4 // bodySize + correlation_id size
 	resData := make([]byte, bodySize+8) // body(variable) + correlation id(4 bytes) + message_size (4 bytes)
-	binary.BigEndian.PutUint32(resData[0:4], uint32(bodySize))
+	binary.BigEndian.PutUint32(resData[0:4], uint32(messageSize))
 	binary.BigEndian.PutUint32(resData[4:8], uint32(res.CorrelationId))
 	copy(resData[8:], res.Body)
 	_, err := conn.Write(resData)
@@ -66,7 +67,7 @@ func handleApiVersionsRequest(req Request) Response {
 		errorCode = 35
 	}
 
-	responseBodyLength := 2 + 1 + 3 + (len(supportedAPIs) * 7) // 2 (error_code) + 1 (array_length) + 3 (throttle + tag_buffer) + 6 for each api (2 bytes for api_key, 2 bytes for min_api_version, 2 bytes for max_api_version, 1 byte for tag_buffers)
+	responseBodyLength := 2 + 1 + 5 + (len(supportedAPIs) * 7) // 2 (error_code) + 1 (array_length) + 5 (4 bytes for throttle + 1 byte for tag_buffer) + 7 for each api (2 bytes for api_key, 2 bytes for min_api_version, 2 bytes for max_api_version, 1 byte for tag_buffers)
 
 	fmt.Println("Response body length: ", responseBodyLength)
 
@@ -87,8 +88,8 @@ func handleApiVersionsRequest(req Request) Response {
 		offset += 1
 	}
 
-	binary.BigEndian.PutUint16(responseBody[offset:offset+2], uint16(0)) // throttle
-	offset += 2
+	binary.BigEndian.PutUint32(responseBody[offset:offset+4], uint32(0)) // throttle
+	offset += 4
 	responseBody[offset] = 0 // tag_buffer
 	offset += 1
 
