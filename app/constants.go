@@ -7,11 +7,13 @@ var NULL_UUID = UUID{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 const (
 	API_VERSIONS_REQUEST_KEY              = 18
 	DESCRIBE_TOPIC_PARTITIONS_REQUEST_KEY = 75
+	FETCH_REQUEST_KEY                      = 1
 )
 
 var SUPPORTED_APIS = []SupportedAPIs{
 	{ApiKey: API_VERSIONS_REQUEST_KEY, MinAPIVersion: 0, MaxAPIVersion: 4, ApiName: "ApiVersions"},
 	{ApiKey: DESCRIBE_TOPIC_PARTITIONS_REQUEST_KEY, MinAPIVersion: 0, MaxAPIVersion: 0, ApiName: "DescribeTopicPartitions"},
+	{ApiKey: FETCH_REQUEST_KEY, MinAPIVersion: 0, MaxAPIVersion: 16, ApiName: "Fetch"},
 }
 
 type ERROR_CODE = int16
