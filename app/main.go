@@ -34,6 +34,8 @@ func handleConnection(conn net.Conn) {
 			res = handleApiVersionsRequest(req)
 		case DESCRIBE_TOPIC_PARTITIONS_REQUEST_KEY:
 			res = handleDescribeTopicPartitionsRequest(req)
+		case FETCH_REQUEST_KEY:
+			res = handleFetchRequest(req)
 		default:
 			fmt.Println("Unknown API key: ", req.RequestApiKey)
 			return
