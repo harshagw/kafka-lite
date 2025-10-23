@@ -86,23 +86,19 @@ func readLogFile(filePath string) ([]*RecordBatch, error) {
 			return nil, fmt.Errorf("unable to read base offset: %w", err)
 		}
 		batch.BaseOffset = int64(baseOffset)
-		fmt.Println("Base Offset: ", batch.BaseOffset)
 
 		batchLength, err := reader.Int32()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read batch length: %w", err)
 		}
 		batch.BatchLength = batchLength
-		fmt.Println("Batch Length: ", batch.BatchLength)
 
 		// Check if we have enough bytes for the batch
 		// If batch length is larger than remaining data, use all remaining data
 		actualBatchLength := int(batchLength)
 		if reader.Remaining() < actualBatchLength {
-			fmt.Println("Remaining: ", reader.Remaining())
 			actualBatchLength = reader.Remaining()
 		}
-		fmt.Println("Actual Batch Length: ", actualBatchLength)
 
 		// Read the batch data
 		batchData, err := reader.Bytes(actualBatchLength)
@@ -118,76 +114,65 @@ func readLogFile(filePath string) ([]*RecordBatch, error) {
 			return nil, fmt.Errorf("unable to read partition leader epoch: %w", err)
 		}
 		batch.PartitionLeaderEpoch = partitionLeaderEpoch
-		fmt.Println("Partition Leader Epoch: ", batch.PartitionLeaderEpoch)
 
 		magicByte, err := batchReader.Int8()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read magic byte: %w", err)
 		}
 		batch.MagicByte = magicByte
-		fmt.Println("Magic Byte: ", batch.MagicByte)
 
 		crc, err := batchReader.Int32()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read CRC: %w", err)
 		}
 		batch.Crc = int32(crc)
-		fmt.Println("CRC: ", batch.Crc)
 
 		attributes, err := batchReader.Int16()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read attributes: %w", err)
 		}
 		batch.Attributes = attributes
-		fmt.Println("Attributes: ", batch.Attributes)
 		
 		lastOffsetDelta, err := batchReader.Int32()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read last offset delta: %w", err)
 		}
 		batch.LastOffsetDelta = lastOffsetDelta
-		fmt.Println("Last Offset Delta: ", batch.LastOffsetDelta)
 
 		baseTimestamp, err := batchReader.Int64()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read base timestamp: %w", err)
 		}
 		batch.BaseTimestamp = baseTimestamp
-		fmt.Println("Base Timestamp: ", batch.BaseTimestamp)
 
 		maxTimestamp, err := batchReader.Int64()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read max timestamp: %w", err)
 		}
 		batch.MaxTimestamp = maxTimestamp
-		fmt.Println("Max Timestamp: ", batch.MaxTimestamp)
 
 		producerId, err := batchReader.Int64()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read producer ID: %w", err)
 		}
 		batch.ProducerId = int64(producerId)
-		fmt.Println("Producer ID: ", batch.ProducerId)
 
 		producerEpoch, err := batchReader.Int16()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read producer epoch: %w", err)
 		}
 		batch.ProducerEpoch = producerEpoch
-		fmt.Println("Producer Epoch: ", batch.ProducerEpoch)
 
 		firstSequence, err := batchReader.Int32()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read first sequence: %w", err)
 		}
 		batch.FirstSequence = firstSequence
-		fmt.Println("First Sequence: ", batch.FirstSequence)
 
 		noOfRecords, err := batchReader.Int32()
 		if err != nil {
 			return nil, fmt.Errorf("unable to read number of records: %w", err)
 		}
-		fmt.Println("No of Records: ", noOfRecords)
 
 		records := make([]Record, noOfRecords)
 		for i := 0; i < int(noOfRecords); i++ {			
@@ -195,7 +180,6 @@ func readLogFile(filePath string) ([]*RecordBatch, error) {
 			if err != nil {
 				return nil, fmt.Errorf("unable to read record length: %w", err)
 			}
-			fmt.Println("Record Length for record ", i, ": ", recordLength)
 
 			recordBytes, err := batchReader.Bytes(int(recordLength))
 			if err != nil {
@@ -208,25 +192,21 @@ func readLogFile(filePath string) ([]*RecordBatch, error) {
 			if err != nil {
 				return nil, fmt.Errorf("unable to read record attributes: %w", err)
 			}
-			fmt.Println("Record Attributes: ", attributes)
 
 			timestampDelta, err := recordReader.VarInt()
 			if err != nil {
 				return nil, fmt.Errorf("unable to read record timestamp delta: %w", err)
 			}
-			fmt.Println("Record Timestamp Delta: ", timestampDelta)
 			
 			offsetDelta, err := recordReader.VarInt()
 			if err != nil {
 				return nil, fmt.Errorf("unable to read record offset delta: %w", err)
 			}
-			fmt.Println("Record Offset Delta: ", offsetDelta)
 
 			keyLength, err := recordReader.VarInt()
 			if err != nil {
 				return nil, fmt.Errorf("unable to read record key length: %w", err)
 			}
-			fmt.Println("Record Key Length: ", keyLength)
 			
 			key := make([]byte, 0)
 
@@ -242,7 +222,6 @@ func readLogFile(filePath string) ([]*RecordBatch, error) {
 			if err != nil {
 				return nil, fmt.Errorf("unable to read record value length: %w", err)
 			}
-			fmt.Println("Record Value Length: ", valueLength)
 
 			value := make([]byte, valueLength)
 			if valueLength > 0 {
@@ -291,17 +270,14 @@ func prepareLogFileData(fileName string) (error) {
 			if err != nil {
 				return err
 			}
-			fmt.Println("Frame Version: ", frameVersion)
 			recordType, err := valueReader.Int8()
 			if err != nil {
 				return err
 			}
-			fmt.Println("Record Type: ", recordType)
 			version, err := valueReader.Int8()
 			if err != nil {
 				return err
 			}
-			fmt.Println("Version: ", version)
 			header := RecordValueHeader{
 				FrameVersion: frameVersion,
 				RecordType: recordType,
@@ -313,18 +289,15 @@ func prepareLogFileData(fileName string) (error) {
 				if err != nil {
 					return err
 				}
-				fmt.Println("Feature Level Name Length: ", nameLength, " after - 1", nameLength-1)
 				nameLength--
 				name, err := valueReader.Bytes(int(nameLength))
 				if err != nil {
 					return err
 				}
-				fmt.Println("Feature Level Name: ", string(name))
 				featureLevel, err := valueReader.Int16()
 				if err != nil {
 					return err
 				}
-				fmt.Println("Feature Level: ", featureLevel)
 				featureLevelRecordValue := FeatureLevelRecordValue{
 					Header: header,
 					Name: string(name),
@@ -337,18 +310,15 @@ func prepareLogFileData(fileName string) (error) {
 				if err != nil {
 					return err
 				}
-				fmt.Println("Topic Name Length: ", nameLength, " after - 1", nameLength-1)
 				nameLength--
 				name, err := valueReader.Bytes(int(nameLength))
 				if err != nil {
 					return err
 				}
-				fmt.Println("Topic Name: ", string(name))
 				topicUUID, err := valueReader.Bytes(16)
 				if err != nil {
 					return err
 				}
-				fmt.Println("Topic UUID: ", topicUUID)
 				topicNameToTopicId[string(name)] = UUID(topicUUID[:])
 				
 				topicRecordValue := TopicRecordValue{
@@ -363,52 +333,42 @@ func prepareLogFileData(fileName string) (error) {
 				if err != nil {
 					return err
 				}
-				fmt.Println("Partition ID: ", partitionId)
 				topicId, err := valueReader.Bytes(16)
 				if err != nil {
 					return err
 				}
-				fmt.Println("Topic ID: ", topicId)
 				replicas, err := valueReader.CompactInt32Array()
 				if err != nil {
 					return err
 				}
-				fmt.Println("Replicas: ", replicas)
 				inSyncReplicas, err := valueReader.CompactInt32Array()
 				if err != nil {
 					return err
 				}
-				fmt.Println("In Sync Replicas: ", inSyncReplicas)
 				removingReplicas, err := valueReader.CompactInt32Array()
 				if err != nil {
 					return err
 				}
-				fmt.Println("Removing Replicas: ", removingReplicas)
 				addingReplicas, err := valueReader.CompactInt32Array()
 				if err != nil {
 					return err
 				}
-				fmt.Println("Adding Replicas: ", addingReplicas)
 				leader, err := valueReader.Int32()
 				if err != nil {
 					return err
 				}
-				fmt.Println("Leader: ", leader)
 				leaderEpoch, err := valueReader.Int32()
 				if err != nil {
 					return err
 				}
-				fmt.Println("Leader Epoch: ", leaderEpoch)
 				partitionEpoch, err := valueReader.Int32()
 				if err != nil {
 					return err
 				}
-				fmt.Println("Partition Epoch: ", partitionEpoch)
 				directoriesLength, err := valueReader.VarUint()
 				if err != nil {
 					return err
 				}
-				fmt.Println("Directories Length: ", directoriesLength)
 				directories := []byte{}
 				if directoriesLength <= 1 {
 					directories = []byte{}
@@ -419,9 +379,7 @@ func prepareLogFileData(fileName string) (error) {
 						return err
 					}
 				}
-				fmt.Println("Directories: ", directories)
 				topicUUID := UUID(topicId[:])
-				fmt.Println("Topic UUID: ", topicUUID)
 				partitionRecordValue := PartitionRecordValue{
 					Header: header,
 					PartitionId: partitionId,
