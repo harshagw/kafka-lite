@@ -70,7 +70,6 @@ func (b *KafkaReader) CompactInt32Array() ([]int32, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Compact Int32 Array Length: ", length)
 	
 	if length <= 1 {
 		return []int32{}, nil

@@ -255,15 +255,20 @@ func handleFetchRequest(req *Request) *Response {
 		HeaderVersion: 1,
 	}
 
+
 	responses := []FetchResponseTopic{}
 	for _, topic := range requestBody.Topics {
-		fmt.Println("topic: ", topic.TopicId)
+		topicId := topicIdToTopicName[topic.TopicId]
+		errorCode := ERROR_CODE_NONE
+		if topicId == "" {
+			errorCode = ERROR_CODE_UNKNOWN_TOPIC_ID
+		}
 		responses = append(responses, FetchResponseTopic{
 			TopicId: topic.TopicId,
 			Partitions: []FetchResponsePartition{
 				{
 					PartitionIndex: 0,
-					ErrorCode: ERROR_CODE_UNKNOWN_TOPIC_ID,
+					ErrorCode: errorCode,
 				},
 			},
 		})

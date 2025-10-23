@@ -64,6 +64,7 @@ type RecordBatch struct {
 }
 
 var topicNameToTopicId = make(map[string]UUID)
+var topicIdToTopicName = make(map[UUID]string)
 var topicIdToPartitions = make(map[UUID][]PartitionRecordValue)
 var partitionIdToPartition = make(map[int32]PartitionRecordValue)
 var featureLevelRecordValues = make([]FeatureLevelRecordValue, 0)
@@ -320,6 +321,7 @@ func prepareLogFileData(fileName string) (error) {
 					return err
 				}
 				topicNameToTopicId[string(name)] = UUID(topicUUID[:])
+				topicIdToTopicName[UUID(topicUUID[:])] = string(name)
 				
 				topicRecordValue := TopicRecordValue{
 					Header: header,
