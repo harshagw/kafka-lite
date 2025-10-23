@@ -8,12 +8,14 @@ const (
 	API_VERSIONS_REQUEST_KEY              = 18
 	DESCRIBE_TOPIC_PARTITIONS_REQUEST_KEY = 75
 	FETCH_REQUEST_KEY                      = 1
+	PRODUCE_REQUEST_KEY                    = 0
 )
 
 var SUPPORTED_APIS = []SupportedAPIs{
 	{ApiKey: API_VERSIONS_REQUEST_KEY, MinAPIVersion: 0, MaxAPIVersion: 4, ApiName: "ApiVersions"},
 	{ApiKey: DESCRIBE_TOPIC_PARTITIONS_REQUEST_KEY, MinAPIVersion: 0, MaxAPIVersion: 0, ApiName: "DescribeTopicPartitions"},
 	{ApiKey: FETCH_REQUEST_KEY, MinAPIVersion: 0, MaxAPIVersion: 16, ApiName: "Fetch"},
+	{ApiKey: PRODUCE_REQUEST_KEY, MinAPIVersion: 0, MaxAPIVersion: 11, ApiName: "Produce"},
 }
 
 type ERROR_CODE = int16
