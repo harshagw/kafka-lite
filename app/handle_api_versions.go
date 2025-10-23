@@ -1,34 +1,51 @@
 package main
 
+
+type ApiVersionsResponseBody struct {
+	ErrorCode ERROR_CODE
+	ApiVersions []SupportedAPIs
+	ThrottleTimeMs int32
+}
+
+func generateBytesFromApiVersionsResponseBody(body *ApiVersionsResponseBody) []byte {
+	writer := NewKafkaWriter()
+
+	writer.Int16(body.ErrorCode)
+	writer.Int8(int8(len(body.ApiVersions) + 1))
+	
+	for _, api := range body.ApiVersions {
+		writer.Int16(api.ApiKey)
+		writer.Int16(api.MinAPIVersion)
+		writer.Int16(api.MaxAPIVersion)
+		writer.Int8(0) // tag_buffer
+	}
+
+	writer.Int32(body.ThrottleTimeMs)
+	writer.Int8(0) // tag_buffer
+	
+	return writer.Build()
+}
+
 func handleApiVersionsRequest(req *Request) *Response {
 	res := Response{
 		CorrelationId: req.CorrelationId,
-		Version:       0,
+		HeaderVersion: 0,
 	}
 
-	var errorCode int16 = 0
+	var errorCode ERROR_CODE = ERROR_CODE_NONE
 
 	if req.RequestApiVersion < 0 || req.RequestApiVersion > 4 {
-		errorCode = 35
+		errorCode = ERROR_CODE_UNSUPPORTED_VERSION
 	}
 
-	responseBodyLength := 2 + 1 + 5 + (len(SUPPORTED_APIS) * 7) // 2 (error_code) + 1 (array_length) + 5 (4 bytes for throttle + 1 byte for tag_buffer) + 7 for each api (2 bytes for api_key, 2 bytes for min_api_version, 2 bytes for max_api_version, 1 byte for tag_buffers)
-
-	buf := NewWriteByteBuffer(&responseBodyLength)
-
-	buf.WriteUint16(uint16(errorCode))
-	buf.WriteUint8(uint8(len(SUPPORTED_APIS) + 1)) // For 0 supported APIs, we send 1 and so on
-
-	for _, api := range SUPPORTED_APIS {
-		buf.WriteUint16(uint16(api.ApiKey))
-		buf.WriteUint16(uint16(api.MinAPIVersion))
-		buf.WriteUint16(uint16(api.MaxAPIVersion))
-		buf.WriteUint8(0) // tag_buffer
+	responseBody := ApiVersionsResponseBody{
+		ErrorCode: errorCode,
+		ApiVersions: SUPPORTED_APIS,
+		ThrottleTimeMs: 0,
 	}
 
-	buf.WriteUint32(uint32(0)) // throttle
-	buf.WriteUint8(0)          // tag_buffer
+	responseBodyBytes := generateBytesFromApiVersionsResponseBody(&responseBody)
 
-	res.Body = buf.Bytes()
+	res.Body = responseBodyBytes
 	return &res
 }

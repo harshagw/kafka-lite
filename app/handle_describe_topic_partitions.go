@@ -1,16 +1,105 @@
 package main
 
-import "math/big"
+import "sort"
 
 type DescribeTopicPartitionsRequestBody struct {
-	Topics                  []string
-	ResponsePartitionLimit uint32
-	Cursor                 uint8
+	Topics                 []string
+	ResponsePartitionLimit int32
+	Cursor                 int8
+}
+
+type DescribeTopicPartitionsResponsePartition struct {
+	ErrorCode              ERROR_CODE
+	Index                  int32
+	LeaderId               int32
+	LeaderEpoch            int32
+	ReplicaNodes           []int32
+	ISRNodes               []int32
+	EligibleLeaderReplicas []int32
+	LastKnownELR           []int32
+	OfflineReplicas        []int32
+}
+
+type DescribeTopicPartitionsResponseTopic struct {
+	ErrorCode                 ERROR_CODE
+	Name                      string
+	Id                        UUID
+	IsInternal                bool
+	Partitions                []DescribeTopicPartitionsResponsePartition
+	TopicAuthorizedOperations int32
+}
+
+type DescribeTopicPartitionsResponseBody struct {
+	ThrottleTimeMs int32
+	Topics         []DescribeTopicPartitionsResponseTopic
+	Cursor         int8
+}
+
+func generateBytesFromDescribeTopicPartitionsResponseBody(body *DescribeTopicPartitionsResponseBody) []byte {
+	writer := NewKafkaWriter()
+
+	writer.Int32(body.ThrottleTimeMs)
+	writer.Int8(int8(len(body.Topics) + 1)) // Compact array of topics
+
+	for _, topic := range body.Topics {
+		writer.Int16(topic.ErrorCode)
+		topicNameLength := len(topic.Name)
+		writer.Int8(int8(topicNameLength) + 1)
+		if topicNameLength > 0 {
+			writer.Bytes([]byte(topic.Name))
+		}
+
+		writer.Bytes(topic.Id[:])
+
+		if topic.IsInternal {
+			writer.Int8(1) // is_internal as true
+		} else {
+			writer.Int8(0) // is_internal as false
+		}
+
+		writer.Int8(int8(len(topic.Partitions) + 1)) // Compact array of partitions
+
+		for _, partition := range topic.Partitions {
+			writer.Int16(partition.ErrorCode)
+			writer.Int32(partition.Index)
+			writer.Int32(partition.LeaderId)
+			writer.Int32(partition.LeaderEpoch)
+			writer.Int8(int8(len(partition.ReplicaNodes) + 1)) // Compact array of replica nodes
+			for _, replicaNode := range partition.ReplicaNodes {
+				writer.Int32(replicaNode)
+			}
+			writer.Int8(int8(len(partition.ISRNodes) + 1)) // Compact array of ISR nodes
+			for _, isrNode := range partition.ISRNodes {
+				writer.Int32(isrNode)
+			}
+			writer.Int8(int8(len(partition.EligibleLeaderReplicas) + 1)) // Compact array of eligible leader replicas
+			for _, eligibleLeaderReplica := range partition.EligibleLeaderReplicas {
+				writer.Int32(eligibleLeaderReplica)
+			}
+			writer.Int8(int8(len(partition.LastKnownELR) + 1)) // Compact array of last known ELR
+			for _, lastKnownELR := range partition.LastKnownELR {
+				writer.Int32(lastKnownELR)
+			}
+			writer.Int8(int8(len(partition.OfflineReplicas) + 1)) // Compact array of offline replicas
+			for _, offlineReplica := range partition.OfflineReplicas {
+				writer.Int32(offlineReplica)
+			}
+			writer.Int8(0) // tag_buffer
+		}
+
+		writer.Int32(topic.TopicAuthorizedOperations) // authorized operations
+		writer.Int8(0) // tag_buffer
+	}
+
+	writer.Int8(body.Cursor) // next cursor
+	writer.Int8(0)           // tag buffer
+
+	return writer.Build()
 }
 
 func parseDescribeTopicPartitionsRequestBody(body []byte) (*DescribeTopicPartitionsRequestBody, error) {
-	buf := NewByteBuffer(body)
-	topicLength, err := buf.ReadUint8()
+	reader := NewKafkaReader(body)
+	topicLength, err := reader.Int8()
 	if err != nil {
 		return nil, err
 	}
@@ -18,31 +107,33 @@ func parseDescribeTopicPartitionsRequestBody(body []byte) (*DescribeTopicPartiti
 	topic := make([]string, topicLength)
 	if topicLength > 0 {
 		for i := 0; i < int(topicLength); i++ {
-			topicNameLength, err := buf.ReadUint8()
+			topicNameLength, err := reader.Int8()
 			if err != nil {
 				return nil, err
 			}
 			topicNameLength--
 			if topicNameLength > 0 {
-				topicName, err := buf.ReadBytes(int(topicNameLength))
+				topicName, err := reader.Bytes(int(topicNameLength))
 				if err != nil {
 					return nil, err
 				}
 				topic[i] = string(topicName)
 			}
-			buf.SkipBytes(1) // topic buffer
+			reader.SkipBytes(1) // topic buffer
 		}
 	}
-	responsePartitionLimit, err := buf.ReadUint32()
+	// sort topics alphabetically
+	sort.Strings(topic)
+	responsePartitionLimit, err := reader.Int32()
 	if err != nil {
 		return nil, err
 	}
-	cursor, err := buf.ReadUint8()
+	cursor, err := reader.Int8()
 	if err != nil {
 		return nil, err
 	}
 	return &DescribeTopicPartitionsRequestBody{
-		Topics:                  topic,
+		Topics:                 topic,
 		ResponsePartitionLimit: responsePartitionLimit,
 		Cursor:                 cursor,
 	}, nil
@@ -56,54 +147,47 @@ func handleDescribeTopicPartitionsRequest(req *Request) *Response {
 
 	res := Response{
 		CorrelationId: req.CorrelationId,
-		Version:       1,
+		HeaderVersion: 1,
 	}
 
-	buf := NewWriteByteBuffer(nil)
-
-	buf.WriteUint32(0) // throttle time
-
-	buf.WriteUint8(uint8(len(requestBody.Topics) + 1))
-
-	// write the topics -- hardcoded until we have topics
-	for _, topic := range requestBody.Topics {
-		buf.WriteUint16(3) // UNKNOWN_TOPIC_OR_PARTITION Error code
-		topicNameLength := len(topic)
-		buf.WriteUint8(uint8(topicNameLength) + 1)
-		if topicNameLength > 0 {
-			buf.WriteBytes([]byte(topic))
-		}
-		
-		buf.WriteBytes(NULL_UUID[:]) // id
-		buf.WriteUint8(0) // is_internal as false
-		buf.WriteUint8(1) // for 0 array of partition
-
-		// for authorized operation
-		bitArray := big.NewInt(0)
-		bitArray.SetBit(bitArray, 0, 0) 
-		bitArray.SetBit(bitArray, 1, 0)
-		bitArray.SetBit(bitArray, 2, 0)
-		bitArray.SetBit(bitArray, 3, 1)
-		bitArray.SetBit(bitArray, 4, 1)
-		bitArray.SetBit(bitArray, 5, 1)
-		bitArray.SetBit(bitArray, 6, 1)
-		bitArray.SetBit(bitArray, 7, 1)
-		bitArray.SetBit(bitArray, 8, 1)
-		bitArray.SetBit(bitArray, 9, 0)
-		bitArray.SetBit(bitArray, 10, 1)
-		bitArray.SetBit(bitArray, 11, 1)
-		bitArray.SetBit(bitArray, 12, 0)
-		bitArray.SetBit(bitArray, 13, 0)
-		bitArray.SetBit(bitArray, 14, 0)
-		bitArray.SetBit(bitArray, 15, 0)
-		buf.WriteUint32(uint32(bitArray.Int64())) 
-
-		buf.WriteUint8(0) // tag_buffer 
+	responseBody := DescribeTopicPartitionsResponseBody{
+		ThrottleTimeMs: 0,
+		Topics: func() []DescribeTopicPartitionsResponseTopic {
+			topics := make([]DescribeTopicPartitionsResponseTopic, len(requestBody.Topics))
+			for i := range requestBody.Topics {
+				topicId := topicNameToTopicId[requestBody.Topics[i]]
+				errorCode := ERROR_CODE_NONE
+				if topicId == NULL_UUID {
+					errorCode = ERROR_CODE_UNKNOWN_TOPIC_OR_PARTITION
+				}
+				topics[i] = DescribeTopicPartitionsResponseTopic{
+					ErrorCode:                 errorCode,
+					Name:                      requestBody.Topics[i],
+					Id:                        topicId,
+					IsInternal:                false,
+					Partitions:                func() []DescribeTopicPartitionsResponsePartition {
+						partitions := make([]DescribeTopicPartitionsResponsePartition, len(topicIdToPartitions[topicId]))
+						for i := range topicIdToPartitions[topicId] {
+							partition := topicIdToPartitions[topicId][i]
+							partitions[i] = DescribeTopicPartitionsResponsePartition{
+								ErrorCode:                 ERROR_CODE_NONE,
+								Index:                     partition.PartitionId,
+								LeaderId:                  partition.Leader,
+								LeaderEpoch:               partition.LeaderEpoch,
+								ReplicaNodes:              partition.Replicas,
+								ISRNodes:                  partition.InSyncReplicas,
+							}
+						}
+						return partitions
+					}(),
+					TopicAuthorizedOperations: int32(0), // for now, lets this be some constant value
+				}
+			}
+			return topics
+		}(),
+		Cursor: int8(-1), // null for now
 	}
 
-
-	buf.WriteUint8(NULL_UINT8) // next cursor
-	buf.WriteUint8(0)          // tag buffer
-	res.Body = buf.Bytes()
+	res.Body = generateBytesFromDescribeTopicPartitionsResponseBody(&responseBody)
 	return &res
 }

@@ -30,16 +30,23 @@ func handleConnection(conn net.Conn) {
 
 		var res *Response = nil
 		switch req.RequestApiKey {
-		case 18: // ApiVersions
+		case API_VERSIONS_REQUEST_KEY:
 			res = handleApiVersionsRequest(req)
-		case 75: // DescribeTopicPartitions
+		case DESCRIBE_TOPIC_PARTITIONS_REQUEST_KEY:
 			res = handleDescribeTopicPartitionsRequest(req)
 		default:
 			fmt.Println("Unknown API key: ", req.RequestApiKey)
 			return
 		}
 
-		sendResponse(conn, res)
+		result := encodeResponse(res)
+
+		// Send the response
+		_, err = conn.Write(result)
+		if err != nil {
+			fmt.Println("Error sending response: ", err.Error())
+			os.Exit(1)
+		}
 	}
 }
 
@@ -49,6 +56,9 @@ func main() {
 		fmt.Println("Failed to bind to port 9092")
 		os.Exit(1)
 	}
+
+	prepareLogFileData(LOGS_SRC_FOLDER)
+	
 
 	for {
 		fmt.Println("Waiting for connection...")
