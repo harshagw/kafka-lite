@@ -1,6 +1,11 @@
 package main
 
-import "fmt"
+import "slices"
+
+type FetchResponsePartitionAbortedTransaction struct {
+	ProducerId int64
+	FirstOffset int64
+}
 
 type FetchResponsePartition struct {
 	PartitionIndex int32
@@ -8,7 +13,9 @@ type FetchResponsePartition struct {
 	HighWatermark int64
 	LastStableOffset int64
 	LogStartOffset int64
+	AbortedTransactions []FetchResponsePartitionAbortedTransaction
 	PreferredReadReplica int32
+	Records []byte
 }
 
 type FetchResponseTopic struct {
@@ -228,11 +235,16 @@ func generateBytesFromFetchResponseBody(body *FetchResponseBody) []byte {
 			writer.Int64(partition.LastStableOffset)
 			writer.Int64(partition.LogStartOffset)
 
-			writer.Int8(1) // 0 length for aborted_transactions
+			writer.Int8(int8(len(partition.AbortedTransactions) + 1))
+			for _, abortedTransaction := range partition.AbortedTransactions {
+				writer.Int64(abortedTransaction.ProducerId)
+				writer.Int64(abortedTransaction.FirstOffset)
+				writer.Int8(0) // tag buffer
+			}
 
 			writer.Int32(partition.PreferredReadReplica)
-
-			writer.Int8(0) // 0 length for RecordBatches
+			writer.Int8(int8(len(partition.Records)+1))
+			writer.Bytes(partition.Records)
 
 			writer.Int8(0) // tag buffer
 		}
@@ -255,25 +267,64 @@ func handleFetchRequest(req *Request) *Response {
 		HeaderVersion: 1,
 	}
 
-
 	responses := []FetchResponseTopic{}
 	for _, topic := range requestBody.Topics {
-		topicId := topicIdToTopicName[topic.TopicId]
+		_, ok := topicIdToTopicName[topic.TopicId]
 		errorCode := ERROR_CODE_NONE
-		if topicId == "" {
+		if !ok {
 			errorCode = ERROR_CODE_UNKNOWN_TOPIC_ID
+			responses = append(responses, FetchResponseTopic{
+				TopicId: topic.TopicId,
+				Partitions: []FetchResponsePartition{
+					{
+						PartitionIndex: 0,
+						ErrorCode: errorCode,
+					},
+				},
+			})
+			continue
+		}
+
+		partitionIds, ok := topicIdToPartitionIds[topic.TopicId]
+		if !ok {
+			responses = append(responses, FetchResponseTopic{
+				TopicId: topic.TopicId,
+				Partitions: []FetchResponsePartition{},
+			})
+			continue
+		}
+
+		partitions := []FetchResponsePartition{}
+		for _, partition := range topic.Partitions {
+			partitionId := partition.Partition
+			hasPartition := slices.Contains(partitionIds, partitionId)
+			if !hasPartition {
+				partitions = append(partitions, FetchResponsePartition{
+					PartitionIndex: partitionId,
+					ErrorCode: ERROR_CODE_UNKNOWN_TOPIC_OR_PARTITION,
+				})
+				continue
+			}
+
+			records, err := getTopicPartitionRecords(topic.TopicId, partitionId)
+			if err != nil {
+				partitions = append(partitions, FetchResponsePartition{
+					PartitionIndex: partitionId,
+					ErrorCode: ERROR_CODE_UNKNOWN_TOPIC_OR_PARTITION,
+				})
+				continue
+			}
+			partitions = append(partitions, FetchResponsePartition{
+				PartitionIndex: partitionId,
+				ErrorCode: errorCode,
+				Records: records,
+			})
 		}
 		responses = append(responses, FetchResponseTopic{
 			TopicId: topic.TopicId,
-			Partitions: []FetchResponsePartition{
-				{
-					PartitionIndex: 0,
-					ErrorCode: errorCode,
-				},
-			},
+			Partitions: partitions,
 		})
 	}
-	fmt.Println("responses: ", responses)
 
 	responseBody := FetchResponseBody{
 		ErrorCode: ERROR_CODE_NONE,

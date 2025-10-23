@@ -26,5 +26,5 @@ const (
 )
 
 const METADATA_TOPIC = "__clusters_metadata"
-
+const LOGS_BASE_FOLDER = "/tmp/kraft-combined-logs/"
 const LOGS_SRC_FOLDER = "/tmp/kraft-combined-logs/__cluster_metadata-0/00000000000000000000.log"

@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 )
 
 type RecordValueHeader struct {
@@ -64,11 +66,13 @@ type RecordBatch struct {
 }
 
 var topicNameToTopicId = make(map[string]UUID)
+
 var topicIdToTopicName = make(map[UUID]string)
+var topicIdToTopicRecord = make(map[UUID][]TopicRecordValue)
 var topicIdToPartitions = make(map[UUID][]PartitionRecordValue)
-var partitionIdToPartition = make(map[int32]PartitionRecordValue)
+var topicIdToPartitionIds = make(map[UUID][]int32)
+
 var featureLevelRecordValues = make([]FeatureLevelRecordValue, 0)
-var topicRecordValues = make([]TopicRecordValue, 0)
 
 func readLogFile(filePath string) ([]*RecordBatch, error) {
 	fileBytes, err := os.ReadFile(filePath)
@@ -328,7 +332,8 @@ func prepareLogFileData(fileName string) (error) {
 					Name: string(name),
 					Id: UUID(topicUUID[:]),
 				}
-				topicRecordValues = append(topicRecordValues, topicRecordValue)
+				topicId := UUID(topicUUID[:])
+				topicIdToTopicRecord[topicId] = append(topicIdToTopicRecord[topicId], topicRecordValue)
 			} else if recordType == 3 {
 				// Partition record
 				partitionId, err := valueReader.Int32()
@@ -395,11 +400,44 @@ func prepareLogFileData(fileName string) (error) {
 					PartitionEpoch: partitionEpoch,
 					Directories: directories,
 				}
-				partitionIdToPartition[partitionId] = partitionRecordValue
 				topicIdToPartitions[topicUUID] = append(topicIdToPartitions[topicUUID], partitionRecordValue)
+				topicIdToPartitionIds[topicUUID] = append(topicIdToPartitionIds[topicUUID], partitionId)
 			}
 		}
 	}
 
 	return nil
+}
+
+
+func getTopicPartitionRecords(topicId UUID, partitionIndex int32) ([]byte, error) {
+	topicName := topicIdToTopicName[topicId]
+	folderPath := LOGS_BASE_FOLDER + topicName + "-" + strconv.Itoa(int(partitionIndex))
+	if _, err := os.Stat(folderPath); os.IsNotExist(err) {
+		return nil, err
+	}
+
+	files, err := os.ReadDir(folderPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return []byte{}, nil
+	}
+
+	records := make([]byte, 0)
+	for _, file := range files {
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".log") {
+			continue
+		}
+
+		filePath := folderPath + "/" + file.Name()
+		fileBytes, err := os.ReadFile(filePath)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, fileBytes...)
+	}
+
+	return records, nil
 }
