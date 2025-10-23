@@ -243,7 +243,7 @@ func generateBytesFromFetchResponseBody(body *FetchResponseBody) []byte {
 			}
 
 			writer.Int32(partition.PreferredReadReplica)
-			writer.Int8(int8(len(partition.Records)+1))
+			writer.VarUint(uint64(len(partition.Records)+1))
 			writer.Bytes(partition.Records)
 
 			writer.Int8(0) // tag buffer
@@ -270,15 +270,14 @@ func handleFetchRequest(req *Request) *Response {
 	responses := []FetchResponseTopic{}
 	for _, topic := range requestBody.Topics {
 		_, ok := topicIdToTopicName[topic.TopicId]
-		errorCode := ERROR_CODE_NONE
 		if !ok {
-			errorCode = ERROR_CODE_UNKNOWN_TOPIC_ID
+			// Topic not found
 			responses = append(responses, FetchResponseTopic{
 				TopicId: topic.TopicId,
 				Partitions: []FetchResponsePartition{
 					{
 						PartitionIndex: 0,
-						ErrorCode: errorCode,
+						ErrorCode: ERROR_CODE_UNKNOWN_TOPIC_ID,
 					},
 				},
 			})
@@ -287,6 +286,7 @@ func handleFetchRequest(req *Request) *Response {
 
 		partitionIds, ok := topicIdToPartitionIds[topic.TopicId]
 		if !ok {
+			// Topic has no partitions
 			responses = append(responses, FetchResponseTopic{
 				TopicId: topic.TopicId,
 				Partitions: []FetchResponsePartition{},
@@ -299,6 +299,7 @@ func handleFetchRequest(req *Request) *Response {
 			partitionId := partition.Partition
 			hasPartition := slices.Contains(partitionIds, partitionId)
 			if !hasPartition {
+				// Partition not found
 				partitions = append(partitions, FetchResponsePartition{
 					PartitionIndex: partitionId,
 					ErrorCode: ERROR_CODE_UNKNOWN_TOPIC_OR_PARTITION,
@@ -308,6 +309,7 @@ func handleFetchRequest(req *Request) *Response {
 
 			records, err := getTopicPartitionRecords(topic.TopicId, partitionId)
 			if err != nil {
+				// Error getting partition records
 				partitions = append(partitions, FetchResponsePartition{
 					PartitionIndex: partitionId,
 					ErrorCode: ERROR_CODE_UNKNOWN_TOPIC_OR_PARTITION,
@@ -316,7 +318,7 @@ func handleFetchRequest(req *Request) *Response {
 			}
 			partitions = append(partitions, FetchResponsePartition{
 				PartitionIndex: partitionId,
-				ErrorCode: errorCode,
+				ErrorCode: ERROR_CODE_NONE,
 				Records: records,
 			})
 		}

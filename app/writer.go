@@ -106,3 +106,23 @@ func (w *KafkaWriter) Length() int {
 	return len(w.data)
 }
 
+// VarInt writes a variable-size integer (varint) to the buffer with zig zag encoding
+func (w *KafkaWriter) VarInt(value int64) {
+	encoded := uint64((value << 1) ^ (value >> 63))
+	
+	for encoded >= 0x80 {
+		w.data = append(w.data, byte(encoded)|0x80)
+		encoded >>= 7
+	}
+	w.data = append(w.data, byte(encoded))
+}
+
+// VarUint writes a variable-size unsigned integer (varuint) to the buffer
+func (w *KafkaWriter) VarUint(value uint64) {
+	for value >= 0x80 {
+		w.data = append(w.data, byte(value)|0x80)
+		value >>= 7
+	}
+	w.data = append(w.data, byte(value))
+}
+
