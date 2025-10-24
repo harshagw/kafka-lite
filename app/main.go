@@ -59,7 +59,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	prepareLogFileData(LOGS_SRC_FOLDER)
+	err = prepareLogFileData(TEST_LOG_FILE)
+	if err != nil {
+		fmt.Println("Error preparing log file data: ", err.Error())
+		os.Exit(1)
+	}
 	
 
 	for {

@@ -5,249 +5,99 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/codecrafters-io/kafka-starter-go/app/ktypes"
 )
 
 type RecordValueHeader struct {
-	FrameVersion int8
-	RecordType   int8
-	Version      int8
+	FrameVersion ktypes.Int8 `order:"1"`
+	RecordType   ktypes.Int8 `order:"2"`
+	Version      ktypes.Int8 `order:"3"`
 }
 
 type  FeatureLevelRecordValue struct {
-	Header RecordValueHeader
-	Name string
-	FeatureLevel int16
+	Header RecordValueHeader `order:"1"`
+	Name ktypes.String `order:"2"`
+	FeatureLevel ktypes.Int16 `order:"3"`
 }
 
 type TopicRecordValue struct {
-	Header RecordValueHeader
-	Name   string
-	Id     UUID
+	Header RecordValueHeader `order:"1"`
+	Name   ktypes.String `order:"2"`
+	Id     ktypes.UUID `order:"3"`
 }
 
 type PartitionRecordValue struct {
-	Header RecordValueHeader
-	PartitionId int32
-	TopicId     UUID
-	Replicas    []int32
-	InSyncReplicas         []int32
-	RemovingReplicas       []int32
-	AddingReplicas         []int32
-	Leader int32
-	LeaderEpoch int32
-	PartitionEpoch int32
-	Directories []byte // implement this later properly
+	Header RecordValueHeader `order:"1"`
+	PartitionId ktypes.Int32 `order:"2"`
+	TopicId     ktypes.UUID `order:"3"`
+	Replicas    ktypes.CompactArray[ktypes.Int32] `order:"4"`
+	InSyncReplicas         ktypes.CompactArray[ktypes.Int32] `order:"5"`
+	RemovingReplicas       ktypes.CompactArray[ktypes.Int32] `order:"6"`
+	AddingReplicas         ktypes.CompactArray[ktypes.Int32] `order:"7"`
+	Leader ktypes.Int32 `order:"8"`
+	LeaderEpoch ktypes.Int32 `order:"9"`
+	PartitionEpoch ktypes.Int32 `order:"10"`
+	Directories ktypes.CompactBytes `order:"11"` // implement this later properly
 }
 
 type Record struct {
-	Length         int64
-	Attributes     int8
-	TimestampDelta int64
-	OffsetDelta    int64
-	Key            []byte
-	Value          []byte
-	Headers        []byte // To be fixed later
+	Length         ktypes.VarInt `order:"1"`
+	Attributes     ktypes.Int8 `order:"2"`
+	TimestampDelta ktypes.VarInt `order:"3"`
+	OffsetDelta    ktypes.VarInt `order:"4"`
+	Key            ktypes.Bytes `order:"5"`
+	Value          ktypes.Bytes `order:"6"`
+	Headers        ktypes.Bytes `order:"7"` // To be fixed later
 }
 
 type RecordBatch struct {
-	BaseOffset           int64
-	BatchLength          int32
-	PartitionLeaderEpoch int32
-	MagicByte            int8
-	Crc                  int32
-	Attributes           int16
-	LastOffsetDelta      int32
-	BaseTimestamp        int64
-	MaxTimestamp         int64
-	ProducerId           int64
-	ProducerEpoch        int16
-	FirstSequence        int32
-	Records              []Record
+	BaseOffset           ktypes.Int64 `order:"1"`
+	BatchLength          ktypes.Int32 `order:"2"`
+	PartitionLeaderEpoch ktypes.Int32 `order:"3"`
+	MagicByte            ktypes.Int8 `order:"4"`
+	Crc                  ktypes.Int32 `order:"5"`
+	Attributes           ktypes.Int16 `order:"6"`
+	LastOffsetDelta      ktypes.Int32 `order:"7"`
+	BaseTimestamp        ktypes.Int64 `order:"8"`
+	MaxTimestamp         ktypes.Int64 `order:"9"`
+	ProducerId           ktypes.Int64 `order:"10"`
+	ProducerEpoch        ktypes.Int16 `order:"11"`
+	FirstSequence        ktypes.Int32 `order:"12"`
+	Records              ktypes.Array[Record] `order:"13"`
 }
 
-var topicNameToTopicId = make(map[string]UUID)
+var topicNameToTopicId = make(map[string]ktypes.UUID)
 
-var topicIdToTopicName = make(map[UUID]string)
-var topicIdToTopicRecord = make(map[UUID][]TopicRecordValue)
-var topicIdToPartitions = make(map[UUID][]PartitionRecordValue)
-var topicIdToPartitionIds = make(map[UUID][]int32)
+var topicIdToTopicName = make(map[ktypes.UUID]string)
+var topicIdToTopicRecord = make(map[ktypes.UUID][]TopicRecordValue)
+var topicIdToPartitions = make(map[ktypes.UUID][]PartitionRecordValue)
+var topicIdToPartitionIds = make(map[ktypes.UUID][]int32)
 
 var featureLevelRecordValues = make([]FeatureLevelRecordValue, 0)
 
+
+// Returns the log file as an array of RecordBatch.
 func readLogFile(filePath string) ([]*RecordBatch, error) {
 	fileBytes, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read file: %w", err)
 	}
-
-	reader := NewKafkaReader(fileBytes)
+	decoder := ktypes.NewKDecoder(fileBytes)
 
 	batches := make([]*RecordBatch, 0)
-	for reader.Remaining() > 0 {
-		batch := RecordBatch{}
-
-		baseOffset, err := reader.Int64()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read base offset: %w", err)
+	for decoder.HasMoreData() {
+		// Check if we have enough bytes for a minimal RecordBatch
+		// Minimum is: BaseOffset (8) + BatchLength (4) = 12 bytes
+		if decoder.RemainingBytes() < 12 {
+			// Not enough bytes for another RecordBatch, break
+			break
 		}
-		batch.BaseOffset = int64(baseOffset)
-
-		batchLength, err := reader.Int32()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read batch length: %w", err)
-		}
-		batch.BatchLength = batchLength
-
-		// Check if we have enough bytes for the batch
-		// If batch length is larger than remaining data, use all remaining data
-		actualBatchLength := int(batchLength)
-		if reader.Remaining() < actualBatchLength {
-			actualBatchLength = reader.Remaining()
-		}
-
-		// Read the batch data
-		batchData, err := reader.Bytes(actualBatchLength)
-		if err != nil {
-			return nil, fmt.Errorf("unable to read batch data: %w", err)
-		}
-
-		// Create a new reader for the batch data
-		batchReader := NewKafkaReader(batchData)
-
-		partitionLeaderEpoch, err := batchReader.Int32()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read partition leader epoch: %w", err)
-		}
-		batch.PartitionLeaderEpoch = partitionLeaderEpoch
-
-		magicByte, err := batchReader.Int8()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read magic byte: %w", err)
-		}
-		batch.MagicByte = magicByte
-
-		crc, err := batchReader.Int32()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read CRC: %w", err)
-		}
-		batch.Crc = int32(crc)
-
-		attributes, err := batchReader.Int16()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read attributes: %w", err)
-		}
-		batch.Attributes = attributes
 		
-		lastOffsetDelta, err := batchReader.Int32()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read last offset delta: %w", err)
+		var batch RecordBatch
+		if err := decoder.Decode(&batch); err != nil {
+			return nil, fmt.Errorf("unable to decode the record batch: %w", err)
 		}
-		batch.LastOffsetDelta = lastOffsetDelta
-
-		baseTimestamp, err := batchReader.Int64()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read base timestamp: %w", err)
-		}
-		batch.BaseTimestamp = baseTimestamp
-
-		maxTimestamp, err := batchReader.Int64()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read max timestamp: %w", err)
-		}
-		batch.MaxTimestamp = maxTimestamp
-
-		producerId, err := batchReader.Int64()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read producer ID: %w", err)
-		}
-		batch.ProducerId = int64(producerId)
-
-		producerEpoch, err := batchReader.Int16()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read producer epoch: %w", err)
-		}
-		batch.ProducerEpoch = producerEpoch
-
-		firstSequence, err := batchReader.Int32()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read first sequence: %w", err)
-		}
-		batch.FirstSequence = firstSequence
-
-		noOfRecords, err := batchReader.Int32()
-		if err != nil {
-			return nil, fmt.Errorf("unable to read number of records: %w", err)
-		}
-
-		records := make([]Record, noOfRecords)
-		for i := 0; i < int(noOfRecords); i++ {			
-			recordLength, err := batchReader.VarInt()
-			if err != nil {
-				return nil, fmt.Errorf("unable to read record length: %w", err)
-			}
-
-			recordBytes, err := batchReader.Bytes(int(recordLength))
-			if err != nil {
-				return nil, fmt.Errorf("unable to read record bytes: %w", err)
-			}
-
-			recordReader := NewKafkaReader(recordBytes)
-
-			attributes, err := recordReader.Int8()
-			if err != nil {
-				return nil, fmt.Errorf("unable to read record attributes: %w", err)
-			}
-
-			timestampDelta, err := recordReader.VarInt()
-			if err != nil {
-				return nil, fmt.Errorf("unable to read record timestamp delta: %w", err)
-			}
-			
-			offsetDelta, err := recordReader.VarInt()
-			if err != nil {
-				return nil, fmt.Errorf("unable to read record offset delta: %w", err)
-			}
-
-			keyLength, err := recordReader.VarInt()
-			if err != nil {
-				return nil, fmt.Errorf("unable to read record key length: %w", err)
-			}
-			
-			key := make([]byte, 0)
-
-			if keyLength > 0 {
-				key = make([]byte, keyLength)
-				key, err = recordReader.Bytes(int(keyLength))
-				if err != nil {
-					return nil, fmt.Errorf("unable to read record key: %w", err)
-				}
-			}
-
-			valueLength, err := recordReader.VarInt()
-			if err != nil {
-				return nil, fmt.Errorf("unable to read record value length: %w", err)
-			}
-
-			value := make([]byte, valueLength)
-			if valueLength > 0 {
-				value, err = recordReader.Bytes(int(valueLength))
-				if err != nil {
-					return nil, fmt.Errorf("unable to read record value: %w", err)
-				}
-			}
-
-			record := Record{
-				Length: recordLength,
-				Attributes: attributes,
-				TimestampDelta: timestampDelta,
-				OffsetDelta: offsetDelta,
-				Key: key,
-				Value: value,
-			}
-			records[i] = record
-		}
-		batch.Records = records
-
 		batches = append(batches, &batch)
 	}
 
@@ -269,139 +119,38 @@ func prepareLogFileData(fileName string) (error) {
 				continue
 			}
 			
-			valueReader := NewKafkaReader(value)
-			// we can get the frame version, type and version from each
-			frameVersion, err := valueReader.Int8()
-			if err != nil {
+			valueDecoder := ktypes.NewKDecoder(value)
+			var header RecordValueHeader
+			if err := valueDecoder.Decode(&header); err != nil {
 				return err
 			}
-			recordType, err := valueReader.Int8()
-			if err != nil {
-				return err
-			}
-			version, err := valueReader.Int8()
-			if err != nil {
-				return err
-			}
-			header := RecordValueHeader{
-				FrameVersion: frameVersion,
-				RecordType: recordType,
-				Version: version,
-			}
-			if recordType == 12 {
+			if header.RecordType == ktypes.Int8(12) {
 				// Feature level record
-				nameLength, err := valueReader.VarUint()
-				if err != nil {
+				var featureLevelRecord FeatureLevelRecordValue
+				featureLevelRecord.Header = header
+				if err := valueDecoder.Decode(&featureLevelRecord); err != nil {
 					return err
 				}
-				nameLength--
-				name, err := valueReader.Bytes(int(nameLength))
-				if err != nil {
-					return err
-				}
-				featureLevel, err := valueReader.Int16()
-				if err != nil {
-					return err
-				}
-				featureLevelRecordValue := FeatureLevelRecordValue{
-					Header: header,
-					Name: string(name),
-					FeatureLevel: featureLevel,
-				}
-				featureLevelRecordValues = append(featureLevelRecordValues, featureLevelRecordValue)
-			} else if recordType == 2 {
+				featureLevelRecordValues = append(featureLevelRecordValues, featureLevelRecord)
+			} else if header.RecordType == ktypes.Int8(2) {
 				// Topic record
-				nameLength, err := valueReader.VarUint()
-				if err != nil {
+				var topicRecord TopicRecordValue
+				topicRecord.Header = header
+				if err := valueDecoder.Decode(&topicRecord); err != nil {
 					return err
 				}
-				nameLength--
-				name, err := valueReader.Bytes(int(nameLength))
-				if err != nil {
-					return err
-				}
-				topicUUID, err := valueReader.Bytes(16)
-				if err != nil {
-					return err
-				}
-				topicNameToTopicId[string(name)] = UUID(topicUUID[:])
-				topicIdToTopicName[UUID(topicUUID[:])] = string(name)
-				
-				topicRecordValue := TopicRecordValue{
-					Header: header,
-					Name: string(name),
-					Id: UUID(topicUUID[:]),
-				}
-				topicId := UUID(topicUUID[:])
-				topicIdToTopicRecord[topicId] = append(topicIdToTopicRecord[topicId], topicRecordValue)
-			} else if recordType == 3 {
+				topicNameToTopicId[string(topicRecord.Name)] = topicRecord.Id
+				topicIdToTopicName[topicRecord.Id] = string(topicRecord.Name)
+				topicIdToTopicRecord[topicRecord.Id] = append(topicIdToTopicRecord[topicRecord.Id], topicRecord)
+			} else if header.RecordType == ktypes.Int8(3) {
 				// Partition record
-				partitionId, err := valueReader.Int32()
-				if err != nil {
+				var partitionRecord PartitionRecordValue
+				partitionRecord.Header = header
+				if err := valueDecoder.Decode(&partitionRecord); err != nil {
 					return err
 				}
-				topicId, err := valueReader.Bytes(16)
-				if err != nil {
-					return err
-				}
-				replicas, err := valueReader.CompactInt32Array()
-				if err != nil {
-					return err
-				}
-				inSyncReplicas, err := valueReader.CompactInt32Array()
-				if err != nil {
-					return err
-				}
-				removingReplicas, err := valueReader.CompactInt32Array()
-				if err != nil {
-					return err
-				}
-				addingReplicas, err := valueReader.CompactInt32Array()
-				if err != nil {
-					return err
-				}
-				leader, err := valueReader.Int32()
-				if err != nil {
-					return err
-				}
-				leaderEpoch, err := valueReader.Int32()
-				if err != nil {
-					return err
-				}
-				partitionEpoch, err := valueReader.Int32()
-				if err != nil {
-					return err
-				}
-				directoriesLength, err := valueReader.VarUint()
-				if err != nil {
-					return err
-				}
-				directories := []byte{}
-				if directoriesLength <= 1 {
-					directories = []byte{}
-				} else {
-					directoriesLength--
-					directories, err = valueReader.Bytes(int(directoriesLength))
-					if err != nil {
-						return err
-					}
-				}
-				topicUUID := UUID(topicId[:])
-				partitionRecordValue := PartitionRecordValue{
-					Header: header,
-					PartitionId: partitionId,
-					TopicId: topicUUID,
-					Replicas: replicas,
-					InSyncReplicas: inSyncReplicas,
-					RemovingReplicas: removingReplicas,
-					AddingReplicas: addingReplicas,
-					Leader: leader,
-					LeaderEpoch: leaderEpoch,
-					PartitionEpoch: partitionEpoch,
-					Directories: directories,
-				}
-				topicIdToPartitions[topicUUID] = append(topicIdToPartitions[topicUUID], partitionRecordValue)
-				topicIdToPartitionIds[topicUUID] = append(topicIdToPartitionIds[topicUUID], partitionId)
+				topicIdToPartitions[partitionRecord.TopicId] = append(topicIdToPartitions[partitionRecord.TopicId], partitionRecord)
+				topicIdToPartitionIds[partitionRecord.TopicId] = append(topicIdToPartitionIds[partitionRecord.TopicId], int32(partitionRecord.PartitionId))
 			}
 		}
 	}
@@ -410,7 +159,7 @@ func prepareLogFileData(fileName string) (error) {
 }
 
 
-func getTopicPartitionRecords(topicId UUID, partitionIndex int32) ([]byte, error) {
+func getTopicPartitionRecords(topicId ktypes.UUID, partitionIndex int32) ([]byte, error) {
 	topicName := topicIdToTopicName[topicId]
 	folderPath := LOGS_BASE_FOLDER + topicName + "-" + strconv.Itoa(int(partitionIndex))
 	if _, err := os.Stat(folderPath); os.IsNotExist(err) {

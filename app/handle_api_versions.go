@@ -1,29 +1,31 @@
 package main
 
+import (
+	"fmt"
+
+	"github.com/codecrafters-io/kafka-starter-go/app/ktypes"
+)
+
+type SupportedAPIsKType struct {
+	ApiKey        ktypes.Int16  `order:"1"`
+	MinAPIVersion ktypes.Int16  `order:"2"`
+	MaxAPIVersion ktypes.Int16  `order:"3"`
+	ApiName       ktypes.String `order:"4"`
+}
 
 type ApiVersionsResponseBody struct {
-	ErrorCode ERROR_CODE
-	ApiVersions []SupportedAPIs
-	ThrottleTimeMs int32
+	ErrorCode      ERROR_CODE  `order:"1"`
+	ApiVersions    ktypes.Array[SupportedAPIsKType] `order:"2"`
+	ThrottleTimeMs ktypes.Int32  `order:"3"`
 }
 
 func generateBytesFromApiVersionsResponseBody(body *ApiVersionsResponseBody) []byte {
-	writer := NewKafkaWriter()
-
-	writer.Int16(body.ErrorCode)
-	writer.Int8(int8(len(body.ApiVersions) + 1))
-	
-	for _, api := range body.ApiVersions {
-		writer.Int16(api.ApiKey)
-		writer.Int16(api.MinAPIVersion)
-		writer.Int16(api.MaxAPIVersion)
-		writer.Int8(0) // tag_buffer
+	encoder := ktypes.NewKEncoder()
+	encoded, err := encoder.Encode(body)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to encode API versions response: %v", err))
 	}
-
-	writer.Int32(body.ThrottleTimeMs)
-	writer.Int8(0) // tag_buffer
-	
-	return writer.Build()
+	return encoded
 }
 
 func handleApiVersionsRequest(req *Request) *Response {
@@ -38,10 +40,17 @@ func handleApiVersionsRequest(req *Request) *Response {
 		errorCode = ERROR_CODE_UNSUPPORTED_VERSION
 	}
 
+	apiVersions := []SupportedAPIsKType{
+		{ApiKey: ktypes.Int16(API_VERSIONS_REQUEST_KEY), MinAPIVersion: ktypes.Int16(0), MaxAPIVersion: ktypes.Int16(4), ApiName: ktypes.String("ApiVersions")},
+		{ApiKey: ktypes.Int16(DESCRIBE_TOPIC_PARTITIONS_REQUEST_KEY), MinAPIVersion: ktypes.Int16(0), MaxAPIVersion: ktypes.Int16(0), ApiName: ktypes.String("DescribeTopicPartitions")},
+		{ApiKey: ktypes.Int16(FETCH_REQUEST_KEY), MinAPIVersion: ktypes.Int16(0), MaxAPIVersion: ktypes.Int16(16), ApiName: ktypes.String("Fetch")},
+		{ApiKey: ktypes.Int16(PRODUCE_REQUEST_KEY), MinAPIVersion: ktypes.Int16(0), MaxAPIVersion: ktypes.Int16(11), ApiName: ktypes.String("Produce")},
+	}
+
 	responseBody := ApiVersionsResponseBody{
-		ErrorCode: errorCode,
-		ApiVersions: SUPPORTED_APIS,
-		ThrottleTimeMs: 0,
+		ErrorCode:      errorCode,
+		ApiVersions:    apiVersions,
+		ThrottleTimeMs: ktypes.Int32(0),
 	}
 
 	responseBodyBytes := generateBytesFromApiVersionsResponseBody(&responseBody)
